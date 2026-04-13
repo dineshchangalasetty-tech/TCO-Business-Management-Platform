@@ -1,4 +1,4 @@
-import React, { Suspense, lazy } from 'react';
+import React, { Suspense, lazy, useEffect, useState } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import {
   useIsAuthenticated,
@@ -9,6 +9,7 @@ import {
 import { Spinner, Text, Button } from '@fluentui/react-components';
 import { Sidebar } from './components/layout/Sidebar';
 import { TopNav } from './components/layout/TopNav';
+import { useFilters } from './hooks/useFilters';
 
 // Lazy-load all pages for code splitting (each page is its own chunk via Vite)
 const Overview = lazy(() => import('./pages/Overview'));
@@ -65,11 +66,38 @@ function LoginPage() {
 /** Main app shell — sidebar + top nav + routed page content */
 function AppShell({ demoMode = false }: { demoMode?: boolean }) {
   const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
+  const [subscriptions, setSubscriptions] = useState<Array<{ id: string; displayName: string }>>([]);
+  const { setSubscriptionId, filter } = useFilters();
 
-  const demoSubscriptions = demoMode ? [
-    { id: 'demo-sub-00000000-0000-0000-0000-000000000000', displayName: 'Contoso Production (Demo)' },
-    { id: 'demo-sub-dev-00000000-0000-0000-0000-000000000001', displayName: 'Contoso Development (Demo)' },
-  ] : [];
+  // Fetch real subscriptions from the backend (demo middleware serves CSV data)
+  useEffect(() => {
+    const API_BASE = import.meta.env['VITE_API_BASE_URL'] ?? 'http://localhost:3001';
+    fetch(`${API_BASE}/api/v1/subscriptions`)
+      .then((r) => r.json())
+      .then((res) => {
+        const subs: Array<{ id: string; displayName: string }> = (res.data ?? []).map(
+          (s: { subscriptionId?: string; id?: string; displayName?: string; name?: string }) => ({
+            id: s.subscriptionId ?? s.id ?? '',
+            displayName: s.displayName ?? s.name ?? s.subscriptionId ?? s.id ?? '',
+          })
+        );
+        setSubscriptions(subs);
+        // Auto-select the first subscription so the dashboard loads immediately
+        if (subs.length > 0 && !filter.subscriptionId) {
+          setSubscriptionId(subs[0]!.id);
+        }
+      })
+      .catch(() => {
+        // Fallback: use static demo subs if backend is not reachable
+        const fallback = [
+          { id: 'AZ-EA-BW-Finance-SC-001', displayName: 'AZ-EA-BW-Finance-SC-001 (Demo)' },
+          { id: 'AZ-WE-LUCA-IT-SC-002',    displayName: 'AZ-WE-LUCA-IT-SC-002 (Demo)' },
+        ];
+        setSubscriptions(fallback);
+        if (!filter.subscriptionId) setSubscriptionId(fallback[0]!.id);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="flex h-screen overflow-hidden bg-gray-100">
@@ -77,7 +105,7 @@ function AppShell({ demoMode = false }: { demoMode?: boolean }) {
       <div className="flex flex-col flex-1 min-w-0">
         <TopNav
           onToggleSidebar={() => setSidebarCollapsed((c) => !c)}
-          subscriptions={demoSubscriptions}
+          subscriptions={subscriptions}
         />
         <div className="flex-1 overflow-auto">
           <Suspense fallback={<PageLoader />}>

@@ -7,14 +7,19 @@ import {
   useGetTopResourcesQuery,
 } from '../api/costApi';
 
+const isDemoMode = import.meta.env['VITE_DEMO_MODE'] === 'true';
+
 /**
  * Composite hook that provides all cost data needed for the dashboard,
  * using the global filter state from Redux.
+ * In demo mode, uses a placeholder subscription ID so data loads immediately.
  */
 export function useCostData() {
   const filter = useSelector((state: RootState) => state.filter);
-  const { subscriptionId, dateRange, groupBy, metric } = filter;
+  const { dateRange, groupBy, metric } = filter;
 
+  // In demo mode the backend ignores the subscriptionId; use any non-empty value
+  const subscriptionId = filter.subscriptionId || (isDemoMode ? 'demo' : '');
   const skipQuery = !subscriptionId;
 
   const {

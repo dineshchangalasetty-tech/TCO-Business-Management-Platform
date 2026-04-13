@@ -10,12 +10,14 @@ import { useFilters } from '../../hooks/useFilters';
 import { useGetReservationSummaryQuery } from '../../api/forecastApi';
 import { formatCurrency } from '../../utils/formatters';
 
+const isDemoMode = import.meta.env['VITE_DEMO_MODE'] === 'true';
+
 /**
  * Reservations page — RI coverage, utilization trend, and savings analysis.
  */
 const Reservations: React.FC = () => {
   const { filter } = useFilters();
-  const subscriptionId = filter.subscriptionId ?? '';
+  const subscriptionId = filter.subscriptionId || (isDemoMode ? 'demo' : '');
 
   const {
     data: reservationData,

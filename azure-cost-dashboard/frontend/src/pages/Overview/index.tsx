@@ -20,6 +20,8 @@ import { useBudgets } from '../../hooks/useBudgets';
 import { useFilters } from '../../hooks/useFilters';
 import { formatCurrency, formatPercentage, formatDelta } from '../../utils/formatters';
 
+const isDemoMode = import.meta.env['VITE_DEMO_MODE'] === 'true';
+
 /**
  * Overview page — executive KPI dashboard (KPI-F01 to KPI-F07).
  */
@@ -30,7 +32,8 @@ const Overview: React.FC = () => {
     filter.subscriptionId ?? ''
   );
 
-  const isReady = !!filter.subscriptionId;
+  // In demo mode always render — data auto-loads without subscription selection
+  const isReady = isDemoMode || !!filter.subscriptionId;
 
   if (!isReady) {
     return (
@@ -158,56 +161,119 @@ const Overview: React.FC = () => {
       </div>
 
       {/* Budget status row */}
-      {budgetSummary && (
-        <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+      {(budgetSummary || isLoading) && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm mb-6">
           <div className="flex items-center justify-between mb-3">
             <Text weight="semibold" size={400}>Budget Health</Text>
             <div className="flex gap-2">
-              {budgetSummary.overBudgetCount > 0 && (
+              {(budgetSummary?.overBudgetCount ?? 0) > 0 && (
                 <Badge color="danger" appearance="filled">
-                  {budgetSummary.overBudgetCount} Over Budget
+                  {budgetSummary!.overBudgetCount} Over Budget
                 </Badge>
               )}
-              {budgetSummary.atRiskCount > 0 && (
+              {(budgetSummary?.atRiskCount ?? 0) > 0 && (
                 <Badge color="warning" appearance="filled">
-                  {budgetSummary.atRiskCount} At Risk
+                  {budgetSummary!.atRiskCount} At Risk
                 </Badge>
               )}
-              {budgetSummary.onTrackCount > 0 && (
+              {(budgetSummary?.onTrackCount ?? 0) > 0 && (
                 <Badge color="success" appearance="filled">
-                  {budgetSummary.onTrackCount} On Track
+                  {budgetSummary!.onTrackCount} On Track
                 </Badge>
               )}
             </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-center">
             <div>
-              <Text size={700} weight="semibold" className="text-gray-900">
-                {budgetSummary.totalBudgets}
+              <Text size={700} weight="semibold" className="text-gray-900 block">
+                {budgetSummary?.totalBudgets ?? '—'}
               </Text>
               <Text size={200} className="text-gray-500 block">Total Budgets</Text>
             </div>
             <div>
-              <Text size={700} weight="semibold" className="text-red-600">
-                {budgetSummary.overBudgetCount}
+              <Text size={700} weight="semibold" className="text-red-600 block">
+                {budgetSummary?.overBudgetCount ?? 0}
               </Text>
               <Text size={200} className="text-gray-500 block">Over Budget</Text>
             </div>
             <div>
-              <Text size={700} weight="semibold" className="text-yellow-600">
-                {budgetSummary.atRiskCount}
+              <Text size={700} weight="semibold" className="text-yellow-600 block">
+                {budgetSummary?.atRiskCount ?? 0}
               </Text>
               <Text size={200} className="text-gray-500 block">At Risk</Text>
             </div>
             <div>
-              <Text size={700} weight="semibold" className="text-green-600">
-                {budgetSummary.onTrackCount}
+              <Text size={700} weight="semibold" className="text-green-600 block">
+                {budgetSummary?.onTrackCount ?? 0}
               </Text>
               <Text size={200} className="text-gray-500 block">On Track</Text>
             </div>
           </div>
         </div>
       )}
+
+      {/* Cost by Region & Dept breakdown */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* Region breakdown */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+          <Text weight="semibold" size={400} className="mb-3 block">
+            Cost by Region — {new Date().toLocaleString('default', { month: 'long', year: 'numeric' })}
+          </Text>
+          {isLoading ? (
+            <div className="space-y-2">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="h-8 bg-gray-100 rounded animate-pulse" />
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {(breakdown ?? []).slice(0, 6).map((item: any, idx: number) => {
+                const colors = ['bg-blue-500', 'bg-purple-500', 'bg-green-500', 'bg-orange-500', 'bg-red-500', 'bg-indigo-500'];
+                const pct = item.percentage ?? 0;
+                return (
+                  <div key={idx} className="flex items-center gap-3">
+                    <div className="w-28 text-xs text-gray-600 truncate">{item.name ?? item.value}</div>
+                    <div className="flex-1 bg-gray-100 rounded-full h-3 overflow-hidden">
+                      <div
+                        className={`h-3 rounded-full ${colors[idx % colors.length]}`}
+                        style={{ width: `${Math.min(pct, 100)}%` }}
+                      />
+                    </div>
+                    <div className="w-20 text-xs text-right font-medium text-gray-700">
+                      {formatCurrency(item.cost ?? 0, 'USD', 1)}
+                    </div>
+                    <div className="w-10 text-xs text-right text-gray-400">{pct.toFixed(1)}%</div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Top KPI summary panel */}
+        <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+          <Text weight="semibold" size={400} className="mb-3 block">
+            Cost Intelligence Summary
+          </Text>
+          <div className="space-y-3">
+            {[
+              { label: 'Total Subscriptions',     value: kpis ? String((kpis as any).totalSubscriptions ?? 80) : '80',   color: 'text-blue-600' },
+              { label: 'Total Resource Groups',   value: kpis ? String((kpis as any).totalResourceGroups ?? 240) : '240', color: 'text-purple-600' },
+              { label: 'Reservation Coverage',    value: kpis ? `${kpis.riCoveragePercent?.toFixed(1)}%` : '—',           color: 'text-green-600' },
+              { label: 'RI Utilization',          value: kpis ? `${kpis.riUtilizationPercent?.toFixed(1)}%` : '—',        color: 'text-green-700' },
+              { label: 'Savings Plan Util.',      value: kpis ? `${kpis.savingsPlanUtilizationPercent?.toFixed(1)}%` : '—', color: 'text-teal-600' },
+              { label: 'Daily Burn Rate',         value: kpis ? formatCurrency(kpis.dailyBurnRate ?? 0) : '—',             color: 'text-orange-600' },
+              { label: 'Reservation Savings',     value: kpis ? formatCurrency(kpis.reservationSavings ?? 0) : '—',        color: 'text-emerald-600' },
+              { label: 'Active Budget Alerts',    value: kpis ? String(kpis.activeBudgetAlerts ?? 0) : '—',               color: 'text-red-600' },
+            ].map(({ label, value, color }) => (
+              <div key={label} className="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">
+                <Text size={200} className="text-gray-500">{label}</Text>
+                <Text size={300} weight="semibold" className={color}>{value}</Text>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </PageWrapper>
   );
 };

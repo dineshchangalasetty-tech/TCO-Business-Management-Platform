@@ -229,10 +229,14 @@ function matchRoute(url: string): string | null {
   if (path === '/api/v1/costs/query') return 'costTrend';
   if (path === '/api/v1/costs/breakdown') return 'breakdown';
   if (path === '/api/v1/costs/top-resources') return 'topResources';
+  if (path === '/api/v1/costs/monthly-trend') return 'monthlyTrend';
+  if (path === '/api/v1/costs/region-breakdown') return 'regionBreakdown';
+  if (path === '/api/v1/costs/dept-breakdown') return 'deptBreakdown';
   if (path.match(/^\/api\/v1\/budgets\/[^/]+\/summary$/)) return 'budgetSummary';
   if (path.match(/^\/api\/v1\/budgets\/[^/]+$/)) return 'budgets';
   if (path.match(/^\/api\/v1\/forecasts\/[^/]+$/)) return 'forecast';
   if (path.match(/^\/api\/v1\/alerts\/[^/]+$/)) return 'alerts';
+  if (path === '/api/v1/reservations/summary') return 'reservationSummary';
   if (path.match(/^\/api\/v1\/reservations\/[^/]+$/)) return 'reservations';
   if (path.match(/^\/api\/v1\/subscriptions/)) return 'subscriptions';
   return null;
@@ -270,6 +274,15 @@ export function demoMiddleware(req: Request, res: Response, next: NextFunction):
       case 'topResources':
         res.json(success(realTopResources(), realTopResources().length));
         break;
+      case 'monthlyTrend':
+        res.json(success(MONTHLY_SPEND_TREND, MONTHLY_SPEND_TREND.length));
+        break;
+      case 'regionBreakdown':
+        res.json(success(REGION_BREAKDOWN, REGION_BREAKDOWN.length));
+        break;
+      case 'deptBreakdown':
+        res.json(success(DEPT_BREAKDOWN, DEPT_BREAKDOWN.length));
+        break;
       case 'budgets':
         if (req.method === 'POST') {
           res.status(201).json(success({ ...realBudgets()[0], id: `budget-${Date.now()}` }));
@@ -290,6 +303,14 @@ export function demoMiddleware(req: Request, res: Response, next: NextFunction):
         break;
       case 'reservations':
         res.json(success(realReservations()));
+        break;
+      case 'reservationSummary':
+        res.json(success({
+          totalReservations: 18,
+          averageUtilizationPercent: 91.7,
+          underutilizedCount: 1,
+          estimatedSavings: KPI_RI_SAVINGS,
+        }));
         break;
       case 'subscriptions':
         res.json(success(realSubscriptions(), realSubscriptions().length));
