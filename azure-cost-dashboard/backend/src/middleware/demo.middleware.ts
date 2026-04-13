@@ -1,231 +1,223 @@
 /**
- * Demo middleware — intercepts all /api/v1/* requests and returns realistic mock data
- * when DEMO_MODE=true. This allows the frontend to be demoed without Azure credentials.
+ * Demo middleware — intercepts all /api/v1/* requests and returns real data
+ * derived from azure_cost_synthetic_full.csv (1.6M rows, 16 months).
+ * Activated when DEMO_MODE=true.
  */
 
 import { Request, Response, NextFunction } from 'express';
-
-const DEMO_SUBSCRIPTION = 'demo-sub-00000000-0000-0000-0000-000000000000';
+import {
+  KPI_CURRENT_MONTH_COST,
+  KPI_PREV_MONTH_COST,
+  KPI_YTD_COST,
+  KPI_MOM_CHANGE_PCT,
+  KPI_OVERALL_BUDGET,
+  KPI_BUDGET_UTILIZATION,
+  KPI_RI_SAVINGS,
+  KPI_RESERVATION_PCT,
+  TOTAL_SUBSCRIPTIONS,
+  TOTAL_RESOURCE_GROUPS,
+  MONTHLY_SPEND_TREND,
+  SERVICE_BREAKDOWN,
+  REGION_BREAKDOWN,
+  DEPT_BREAKDOWN,
+  TOP_RESOURCE_GROUPS,
+  TOP_RESOURCES,
+  SUBSCRIPTIONS,
+  BUDGETS,
+  FORECAST_NEXT_MONTHS,
+  ALERTS,
+  PRICING_MODEL_SPLIT,
+  CURRENT_MONTH,
+} from '../data/csvData';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function daysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().split('T')[0]!;
-}
 
 function success<T>(data: T, count?: number) {
   return { success: true, data, ...(count !== undefined ? { count } : {}) };
 }
 
-// ── Mock data generators ──────────────────────────────────────────────────────
+// ── Real-data response builders ───────────────────────────────────────────────
 
-function mockKPIs() {
-  const mtdTotal = 142_380.5;
-  const prevMonthTotal = 131_200.0;
+function realKPIs() {
+  const dailyBurnRate = KPI_CURRENT_MONTH_COST / 30;
+  const forecastedMonthEnd = KPI_CURRENT_MONTH_COST * 1.03;
   return {
-    totalMonthlyCost: prevMonthTotal,
-    mtdCost: mtdTotal,
-    mtdTotal,
-    forecastedMonthEndCost: 165_000,
-    forecastedMonthEnd: 165_000,
-    budgetUtilizationPercent: 71.2,
-    costVarianceDelta: mtdTotal - prevMonthTotal,
-    costVariancePercent: ((mtdTotal - prevMonthTotal) / prevMonthTotal) * 100,
-    avgDailyBurnRate: 4_746.0,
-    dailyBurnRate: 4_746.0,
-    budgetOverrunRisk: 'low' as const,
-    riskLevel: 'low' as const,
-    riCoveragePercent: 54.3,
-    riUtilizationPercent: 91.7,
+    totalMonthlyCost:             KPI_PREV_MONTH_COST,
+    mtdCost:                      KPI_CURRENT_MONTH_COST,
+    mtdTotal:                     KPI_CURRENT_MONTH_COST,
+    forecastedMonthEndCost:       Math.round(forecastedMonthEnd * 100) / 100,
+    forecastedMonthEnd:           Math.round(forecastedMonthEnd * 100) / 100,
+    budgetUtilizationPercent:     KPI_BUDGET_UTILIZATION,
+    costVarianceDelta:            Math.round((KPI_CURRENT_MONTH_COST - KPI_PREV_MONTH_COST) * 100) / 100,
+    costVariancePercent:          KPI_MOM_CHANGE_PCT,
+    avgDailyBurnRate:             Math.round(dailyBurnRate * 100) / 100,
+    dailyBurnRate:                Math.round(dailyBurnRate * 100) / 100,
+    budgetOverrunRisk:            KPI_BUDGET_UTILIZATION >= 95 ? 'high' : KPI_BUDGET_UTILIZATION >= 80 ? 'medium' : 'low',
+    riskLevel:                    KPI_BUDGET_UTILIZATION >= 95 ? 'high' : KPI_BUDGET_UTILIZATION >= 80 ? 'medium' : 'low',
+    riCoveragePercent:            KPI_RESERVATION_PCT,
+    riUtilizationPercent:         91.7,
     savingsPlanUtilizationPercent: 88.4,
     untaggedResourceSpendPercent: 12.5,
-    activeBudgetAlerts: 2,
-    costAnomaliesDetected: 1,
-    currency: 'USD',
-    lastUpdated: new Date().toISOString(),
-    mtdVsPrevMonth: mtdTotal - prevMonthTotal,
-    mtdVsPrevMonthPercent: ((mtdTotal - prevMonthTotal) / prevMonthTotal) * 100,
-    ytdTotal: 1_042_810.25,
-    prevMonthTotal,
-    reservationSavings: 23_450.0,
+    activeBudgetAlerts:           2,
+    costAnomaliesDetected:        1,
+    currency:                     'USD',
+    lastUpdated:                  new Date().toISOString(),
+    mtdVsPrevMonth:               Math.round((KPI_CURRENT_MONTH_COST - KPI_PREV_MONTH_COST) * 100) / 100,
+    mtdVsPrevMonthPercent:        KPI_MOM_CHANGE_PCT,
+    ytdTotal:                     KPI_YTD_COST,
+    prevMonthTotal:               KPI_PREV_MONTH_COST,
+    reservationSavings:           KPI_RI_SAVINGS,
+    totalSubscriptions:           TOTAL_SUBSCRIPTIONS,
+    totalResourceGroups:          TOTAL_RESOURCE_GROUPS,
   };
 }
 
-function mockCostTrend() {
-  const dataPoints = Array.from({ length: 30 }, (_, i) => {
-    const base = 4200 + Math.sin(i / 3) * 600;
-    const amount = Math.round((base + Math.random() * 400) * 100) / 100;
-    return { date: daysAgo(29 - i), amount, cost: amount, currency: 'USD' };
-  });
+function realCostTrend() {
+  // Use last 13 months of monthly trend as daily-equivalent data points
+  const dataPoints = MONTHLY_SPEND_TREND.slice(-13).map((m: {month: string; cost: number}) => ({
+    date:     m.month + '-01',
+    amount:   m.cost,
+    cost:     m.cost,
+    currency: 'USD',
+  }));
   return {
-    subscriptionId: DEMO_SUBSCRIPTION,
-    totalCost: dataPoints.reduce((s, d) => s + d.amount, 0),
-    currency: 'USD',
-    granularity: 'Daily',
-    dateRange: { from: daysAgo(29), to: daysAgo(0) },
+    subscriptionId:      SUBSCRIPTIONS[0]?.id ?? 'demo-sub',
+    totalCost:           KPI_CURRENT_MONTH_COST,
+    currency:            'USD',
+    granularity:         'Monthly',
+    dateRange:           { from: '2025-04-01', to: CURRENT_MONTH + '-30' },
     dataPoints,
-    previousPeriodCost: 121_400,
-    percentageChange: 8.4,
+    previousPeriodCost:  KPI_PREV_MONTH_COST,
+    percentageChange:    KPI_MOM_CHANGE_PCT,
   };
 }
 
-function mockBreakdown() {
-  const services = [
-    { name: 'Virtual Machines', pct: 38.4 },
-    { name: 'Azure SQL Database', pct: 18.2 },
-    { name: 'Azure Kubernetes Service', pct: 14.7 },
-    { name: 'Azure Storage', pct: 10.1 },
-    { name: 'Azure App Service', pct: 8.6 },
-    { name: 'Azure Cosmos DB', pct: 5.3 },
-    { name: 'Other', pct: 4.7 },
-  ];
-  const total = 142_380;
-  return services.map((s, i) => ({
-    dimension: 'ServiceName',
-    value: s.name,
-    name: s.name,
-    cost: Math.round((total * s.pct) / 100),
-    currency: 'USD',
-    percentage: s.pct,
+function realBreakdown() {
+  return SERVICE_BREAKDOWN.map((s: {service: string; cost: number; percentage: number}) => ({
+    dimension:  'ServiceName',
+    value:      s.service,
+    name:       s.service,
+    cost:       s.cost,
+    currency:   'USD',
+    percentage: s.percentage,
   }));
 }
 
-function mockTopResources() {
-  const resources = [
-    { resourceName: 'prod-aks-cluster-01', resourceType: 'Microsoft.ContainerService/managedClusters', resourceGroup: 'rg-prod-aks', location: 'eastus', cost: 28_400 },
-    { resourceName: 'prod-sql-server-primary', resourceType: 'Microsoft.Sql/servers', resourceGroup: 'rg-prod-data', location: 'eastus', cost: 18_200 },
-    { resourceName: 'prod-vm-scale-set-api', resourceType: 'Microsoft.Compute/virtualMachineScaleSets', resourceGroup: 'rg-prod-compute', location: 'eastus', cost: 15_750 },
-    { resourceName: 'prod-storage-account-logs', resourceType: 'Microsoft.Storage/storageAccounts', resourceGroup: 'rg-prod-storage', location: 'eastus2', cost: 9_800 },
-    { resourceName: 'prod-cosmos-db-main', resourceType: 'Microsoft.DocumentDB/databaseAccounts', resourceGroup: 'rg-prod-data', location: 'eastus', cost: 7_540 },
-    { resourceName: 'prod-app-service-plan', resourceType: 'Microsoft.Web/serverfarms', resourceGroup: 'rg-prod-web', location: 'eastus', cost: 6_200 },
-    { resourceName: 'prod-redis-cache', resourceType: 'Microsoft.Cache/Redis', resourceGroup: 'rg-prod-cache', location: 'eastus', cost: 4_100 },
-    { resourceName: 'prod-key-vault', resourceType: 'Microsoft.KeyVault/vaults', resourceGroup: 'rg-prod-security', location: 'eastus', cost: 1_200 },
-  ];
-  const total = resources.reduce((s, r) => s + r.cost, 0);
-  return resources.map((r, i) => ({
-    resourceId: `/subscriptions/${DEMO_SUBSCRIPTION}/resourceGroups/${r.resourceGroup}/providers/${r.resourceType}/${r.resourceName}`,
-    ...r,
-    serviceType: r.resourceType.split('/')[0] ?? r.resourceType,
-    currency: 'USD',
-    percentage: Math.round((r.cost / total) * 1000) / 10,
+function realTopResources() {
+  return TOP_RESOURCES.map((r: {resourceName: string; serviceName: string; resourceGroup: string; cost: number}) => ({
+    resourceId:    `/subscriptions/${SUBSCRIPTIONS[0]?.id ?? 'demo'}/resourceGroups/${r.resourceGroup}/providers/Microsoft.Resources/${r.resourceName}`,
+    resourceName:  r.resourceName,
+    resourceType:  'Microsoft.Resources/resource',
+    resourceGroup: r.resourceGroup,
+    location:      REGION_BREAKDOWN[0]?.region ?? 'East US',
+    serviceName:   r.serviceName,
+    serviceType:   'Microsoft',
+    cost:          r.cost,
+    currency:      'USD',
+    percentage:    Math.round((r.cost / KPI_CURRENT_MONTH_COST) * 10000) / 100,
   }));
 }
 
-function mockBudgets() {
-  return [
-    {
-      id: 'budget-prod-monthly',
-      name: 'prod-monthly-200k',
-      displayName: 'Production Monthly Budget',
-      amount: 200_000,
-      currentSpend: 142_380,
-      forecastedSpend: 165_000,
-      currency: 'USD',
-      timeGrain: 'Monthly',
-      utilizationPercent: 71.2,
-      forecastedUtilizationPercent: 82.5,
-      status: 'on_track',
-      notifications: [{ threshold: 80, thresholdType: 'Actual', enabled: true, contactEmails: ['admin@contoso.com'] }],
-      timePeriod: { startDate: '2024-01-01' },
-    },
-    {
-      id: 'budget-dev-monthly',
-      name: 'dev-monthly-30k',
-      displayName: 'Development Monthly Budget',
-      amount: 30_000,
-      currentSpend: 27_400,
-      forecastedSpend: 31_200,
-      currency: 'USD',
-      timeGrain: 'Monthly',
-      utilizationPercent: 91.3,
-      forecastedUtilizationPercent: 104.0,
-      status: 'at_risk',
-      notifications: [{ threshold: 90, thresholdType: 'Forecasted', enabled: true, contactEmails: ['dev@contoso.com'] }],
-      timePeriod: { startDate: '2024-01-01' },
-    },
-  ];
+function realBudgets() {
+  return BUDGETS.map((b: {id: string; name: string; amount: number; currentSpend: number; utilization: number; status: string; service: string; period: string}) => ({
+    id:                          b.id,
+    name:                        b.name,
+    displayName:                 b.name,
+    amount:                      b.amount,
+    currentSpend:                b.currentSpend,
+    forecastedSpend:             Math.round(b.currentSpend * 1.05 * 100) / 100,
+    currency:                    'USD',
+    timeGrain:                   'Monthly',
+    utilizationPercent:          b.utilization,
+    forecastedUtilizationPercent: Math.round(b.utilization * 1.05 * 10) / 10,
+    status:                      b.status === 'critical' ? 'at_risk' : b.status === 'warning' ? 'at_risk' : 'on_track',
+    notifications:               [{ threshold: 80, thresholdType: 'Actual', enabled: true, contactEmails: ['admin@company.com'] }],
+    timePeriod:                  { startDate: '2025-01-01' },
+    service:                     b.service,
+  }));
 }
 
-function mockBudgetSummary() {
+function realBudgetSummary() {
+  const budgets = realBudgets();
+  const totalSpend = budgets.reduce((s: number, b: {currentSpend: number}) => s + b.currentSpend, 0);
+  const totalBudget = budgets.reduce((s: number, b: {amount: number}) => s + b.amount, 0);
+  const atRisk = budgets.filter((b: {status: string}) => b.status === 'at_risk').length;
   return {
-    totalBudget: 230_000,
-    totalBudgets: 2,
-    totalSpend: 169_780,
-    utilizationPercent: 73.8,
-    averageUtilizationPercent: 73.8,
-    overBudgetCount: 0,
-    atRiskCount: 1,
-    onTrackCount: 1,
+    totalBudget,
+    totalBudgets:              budgets.length,
+    totalSpend:                Math.round(totalSpend * 100) / 100,
+    utilizationPercent:        KPI_BUDGET_UTILIZATION,
+    averageUtilizationPercent: KPI_BUDGET_UTILIZATION,
+    overBudgetCount:           0,
+    atRiskCount:               atRisk,
+    onTrackCount:              budgets.length - atRisk,
   };
 }
 
-function mockForecast() {
-  const dataPoints = Array.from({ length: 45 }, (_, i) => {
-    const isPast = i < 30;
-    const base = 4200 + Math.sin(i / 4) * 400;
-    const forecasted = Math.round((base + 500) * 100) / 100;
-    return {
-      date: daysAgo(29 - i),
-      forecastedAmount: forecasted,
-      lowerBound: forecasted * 0.88,
-      upperBound: forecasted * 1.12,
-      isActual: isPast,
-    };
-  });
+function realForecast() {
+  const historical = MONTHLY_SPEND_TREND.slice(-6).map((m: {month: string; cost: number}) => ({
+    date:              m.month + '-01',
+    forecastedAmount:  m.cost,
+    lowerBound:        Math.round(m.cost * 0.90 * 100) / 100,
+    upperBound:        Math.round(m.cost * 1.10 * 100) / 100,
+    isActual:          true,
+  }));
+  const future = FORECAST_NEXT_MONTHS.map((m: {month: string; cost: number}) => ({
+    date:             m.month + '-01',
+    forecastedAmount: m.cost,
+    lowerBound:       Math.round(m.cost * 0.88 * 100) / 100,
+    upperBound:       Math.round(m.cost * 1.12 * 100) / 100,
+    isActual:         false,
+  }));
   return {
-    subscriptionId: DEMO_SUBSCRIPTION,
-    currency: 'USD',
-    forecastedTotal: 165_000,
-    dataPoints,
+    subscriptionId:  SUBSCRIPTIONS[0]?.id ?? 'demo-sub',
+    currency:        'USD',
+    forecastedTotal: FORECAST_NEXT_MONTHS[0]?.cost ?? KPI_CURRENT_MONTH_COST * 1.05,
+    dataPoints:      [...historical, ...future],
   };
 }
 
-function mockAlerts() {
-  return [
-    {
-      id: 'alert-001',
-      name: 'Dev Budget At Risk',
-      type: 'Budget',
-      category: 'Cost',
-      severity: 'Medium',
-      status: 'Active',
-      description: 'Development budget is at 91% utilization, forecasted to exceed by month-end.',
-      resourceId: `/subscriptions/${DEMO_SUBSCRIPTION}`,
-      createdAt: daysAgo(2),
-      modifiedAt: daysAgo(0),
-    },
-    {
-      id: 'alert-002',
-      name: 'AKS Cluster Spend Anomaly',
-      type: 'Anomaly',
-      category: 'Cost',
-      severity: 'Low',
-      status: 'Active',
-      description: 'AKS cluster cost increased 34% over the prior 7-day average.',
-      resourceId: `/subscriptions/${DEMO_SUBSCRIPTION}/resourceGroups/rg-prod-aks`,
-      createdAt: daysAgo(1),
-      modifiedAt: daysAgo(0),
-    },
-  ];
+function realAlerts() {
+  return ALERTS.map((a: {id: string; name: string; severity: string; message: string; resource: string; timestamp: string; status: string}) => ({
+    id:          a.id,
+    name:        a.name,
+    type:        'Budget',
+    category:    'Cost',
+    severity:    a.severity === 'critical' ? 'High' : a.severity === 'warning' ? 'Medium' : 'Low',
+    status:      a.status === 'active' ? 'Active' : 'Acknowledged',
+    description: a.message,
+    resourceId:  `/subscriptions/${SUBSCRIPTIONS[0]?.id ?? 'demo'}`,
+    createdAt:   a.timestamp,
+    modifiedAt:  a.timestamp,
+  }));
 }
 
-function mockReservations() {
+function realReservations() {
   return {
     summary: {
-      totalReservations: 12,
-      totalSavings: 23_450,
-      avgUtilization: 91.7,
-      coveragePercent: 54.3,
-      currency: 'USD',
+      totalReservations:  18,
+      totalSavings:       KPI_RI_SAVINGS,
+      avgUtilization:     91.7,
+      coveragePercent:    KPI_RESERVATION_PCT,
+      currency:           'USD',
     },
     reservations: [
-      { id: 'ri-001', displayName: 'VM Reserved Instances - Prod', sku: 'Standard_D8s_v3', quantity: 10, utilization: 94.2, savings: 12_800, expiresAt: '2025-12-31' },
-      { id: 'ri-002', displayName: 'SQL Database Reserved Capacity', sku: 'GP_Gen5_8', quantity: 4, utilization: 88.7, savings: 7_200, expiresAt: '2025-06-30' },
-      { id: 'ri-003', displayName: 'AKS Node Pool Reserved', sku: 'Standard_D4s_v3', quantity: 6, utilization: 96.1, savings: 3_450, expiresAt: '2026-01-31' },
+      { id: 'ri-001', displayName: 'VM Reserved Instances (3-Year)', sku: 'Standard_D8s_v3', quantity: 45, utilization: 94.2, savings: Math.round(KPI_RI_SAVINGS * 0.55), expiresAt: '2027-12-31' },
+      { id: 'ri-002', displayName: 'SQL Database Reserved Capacity', sku: 'GP_Gen5_8',      quantity: 20, utilization: 88.7, savings: Math.round(KPI_RI_SAVINGS * 0.25), expiresAt: '2026-12-31' },
+      { id: 'ri-003', displayName: 'App Service Plan Reservations', sku: 'P2v3',            quantity: 15, utilization: 85.4, savings: Math.round(KPI_RI_SAVINGS * 0.15), expiresAt: '2026-09-30' },
+      { id: 'ri-004', displayName: 'Storage Reserved Capacity',     sku: 'LRS-Hot',         quantity: 10, utilization: 79.1, savings: Math.round(KPI_RI_SAVINGS * 0.05), expiresAt: '2026-06-30' },
     ],
   };
+}
+
+function realSubscriptions() {
+  return SUBSCRIPTIONS.map((s: {id: string; name: string; currentMonthCost: number}) => ({
+    subscriptionId:  s.id,
+    displayName:     s.name,
+    state:           'Enabled',
+    currentMonthCost: s.currentMonthCost,
+    currency:        'USD',
+  }));
 }
 
 // ── Route matcher ─────────────────────────────────────────────────────────────
@@ -260,51 +252,47 @@ export function demoMiddleware(req: Request, res: Response, next: NextFunction):
     return;
   }
 
-  // Simulate slight latency for realism
-  const delay = Math.floor(Math.random() * 200) + 50;
+  const delay = Math.floor(Math.random() * 150) + 50;
   setTimeout(() => {
     switch (route) {
       case 'health':
-        res.json({ status: 'ok', mode: 'demo', timestamp: new Date().toISOString() });
+        res.json({ status: 'ok', mode: 'demo', dataSource: 'synthetic-csv-1.6M-rows', timestamp: new Date().toISOString() });
         break;
       case 'overview':
-        res.json(success(mockKPIs()));
+        res.json(success(realKPIs()));
         break;
       case 'costTrend':
-        res.json(success(mockCostTrend()));
+        res.json(success(realCostTrend()));
         break;
       case 'breakdown':
-        res.json(success(mockBreakdown(), mockBreakdown().length));
+        res.json(success(realBreakdown(), realBreakdown().length));
         break;
       case 'topResources':
-        res.json(success(mockTopResources(), mockTopResources().length));
+        res.json(success(realTopResources(), realTopResources().length));
         break;
       case 'budgets':
         if (req.method === 'POST') {
-          res.status(201).json(success({ ...mockBudgets()[0], id: `budget-${Date.now()}` }));
+          res.status(201).json(success({ ...realBudgets()[0], id: `budget-${Date.now()}` }));
         } else if (req.method === 'DELETE') {
           res.status(204).send();
         } else {
-          res.json(success(mockBudgets(), mockBudgets().length));
+          res.json(success(realBudgets(), realBudgets().length));
         }
         break;
       case 'budgetSummary':
-        res.json(success(mockBudgetSummary()));
+        res.json(success(realBudgetSummary()));
         break;
       case 'forecast':
-        res.json(success(mockForecast()));
+        res.json(success(realForecast()));
         break;
       case 'alerts':
-        res.json(success(mockAlerts(), mockAlerts().length));
+        res.json(success(realAlerts(), realAlerts().length));
         break;
       case 'reservations':
-        res.json(success(mockReservations()));
+        res.json(success(realReservations()));
         break;
       case 'subscriptions':
-        res.json(success([
-          { subscriptionId: DEMO_SUBSCRIPTION, displayName: 'Contoso Production (Demo)', state: 'Enabled' },
-          { subscriptionId: 'demo-sub-dev-00000000-0000-0000-0000-000000000001', displayName: 'Contoso Development (Demo)', state: 'Enabled' },
-        ], 2));
+        res.json(success(realSubscriptions(), realSubscriptions().length));
         break;
       default:
         next();
