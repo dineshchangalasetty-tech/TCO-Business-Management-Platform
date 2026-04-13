@@ -1,0 +1,117 @@
+version: '3.9'
+
+services:
+  # ─── Backend API ─────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cost-dashboard-backend
+    ports:
+      - '3001:3001'
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      REDIS_URL: redis://redis:6379
+      DB_SERVER: sqlserver
+      DB_PORT: 1433
+      DB_NAME: CostDashboard
+      DB_USER: sa
+      DB_PASSWORD: DevPassword123!
+      # Azure API — override in .env.local for real values
+      AZURE_TENANT_ID: ${AZURE_TENANT_ID:-dummy-tenant}
+      AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-dummy-client}
+      AZURE_CLIENT_SECRET: ${AZURE_CLIENT_SECRET:-dummy-secret}
+      AZURE_SUBSCRIPTION_ID: ${AZURE_SUBSCRIPTION_ID:-dummy-sub}
+      CORS_ORIGINS: http://localhost:5173,http://localhost:3000
+      LOG_LEVEL: debug
+    depends_on:
+      redis:
+        condition: service_healthy
+      sqlserver:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:3001/api/v1/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    networks:
+      - cost-dashboard-net
+
+  # ─── Frontend (Dev Server via Vite) ──────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: cost-dashboard-frontend
+    ports:
+      - '5173:5173'
+    environment:
+      VITE_API_BASE_URL: http://localhost:3001
+      VITE_AZURE_CLIENT_ID: ${AZURE_CLIENT_ID:-dummy-client}
+      VITE_AZURE_TENANT_ID: ${AZURE_TENANT_ID:-dummy-tenant}
+    volumes:
+      - ./frontend/src:/app/src   # Hot-reload support
+      - /app/node_modules          # Prevent overwriting container node_modules
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - cost-dashboard-net
+
+  # ─── Redis Cache ──────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: cost-dashboard-redis
+    ports:
+      - '6379:6379'
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cost-dashboard-net
+
+  # ─── SQL Server (dev/test) ───────────────────────────────────────────────────
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: cost-dashboard-sql
+    ports:
+      - '1433:1433'
+    environment:
+      ACCEPT_EULA: Y
+      SA_PASSWORD: DevPassword123!
+      MSSQL_PID: Developer
+    volumes:
+      - sql-data:/var/opt/mssql
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          'CMD',
+          '/opt/mssql-tools18/bin/sqlcmd',
+          '-S', 'localhost',
+          '-U', 'sa',
+          '-P', 'DevPassword123!',
+          '-Q', 'SELECT 1',
+          '-C',
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+    networks:
+      - cost-dashboard-net
+
+volumes:
+  sql-data:
+    driver: local
+
+networks:
+  cost-dashboard-net:
+    driver: bridge
